@@ -1,13 +1,13 @@
 {
-    "name": "canbus",
-    "port": 6001,
+    "name": "oak0",
+    "port": 50010,
     "host": "100.87.161.11",
     "log_level": "INFO",
     "subscriptions": [
         {
             "uri": {
-                "path": "/motor_states",
-                "query": "service_name=canbus"
+                "path": "/rgb",
+                "query": "service_name=oak1"
             },
             "every_n": 1
         }

@@ -1,7 +1,7 @@
 {
     "name": "oak0",
     "port": 50010,
-    "host": "localhost",
+    "host": "100.87.161.11",
     "log_level": "INFO",
     "subscriptions": [
         {
