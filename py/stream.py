@@ -8,6 +8,7 @@ import pynmea2
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from pathlib import Path
+from math import cos, radians
 
 # farm-ng imports
 from farm_ng.canbus.canbus_pb2 import Twist2d
@@ -31,8 +32,11 @@ app.add_middleware(
 latest_coords = {"lat": None, "lng": None, "precision": None}
 last_coordinates = []
 
+
+
 # ------------- live GPS directly from Emlid (over TCP) -------------
 
+ref_coords = {"lat" : None, "lng" : None}
 async def gps_listener():
     """
     Continuously listen to NMEA stream from Emlid Reach RS+
@@ -54,8 +58,22 @@ async def gps_listener():
                     if isinstance(msg, pynmea2.types.talker.GGA):
                         latest_coords["lat"] = msg.latitude
                         latest_coords["lng"] = msg.longitude
-                        latest_coords["precision"] = msg.horizontal_dil #HDOP
-                        print(f"[RTP] updated: lat={latest_coords['lat']}, lon={latest_coords['lng']}; with precision of {latest_coords['precision']}")
+                        latest_coords["precision"] = msg.horizontal_dil # HDOP
+                        try:
+                            #print(f'[REF] raw precision value: {latest_coords["precision"]}')
+                            prec = float(latest_coords["precision"])
+                            #print(f'precision as float: {prec}\nreference coordinate [lat]: {ref_coords["lat"]}')
+                            if(prec < 2.00 and ref_coords["lat"] is None):
+                                ref_coords["lat"] = latest_coords["lat"]
+                                ref_coords["lng"] = latest_coords["lng"]
+                                print(f'[REF] Reference coordinates saved as ({ref_coords["lat"]}, {ref_coords["lng"]})')
+                        except ValueError:
+                            print("[REF ERROR] string to float conversion failed")
+
+                        
+
+
+                        print(f"[GPS] updated: lat={latest_coords['lat']}, lon={latest_coords['lng']}; with precision of {latest_coords['precision']}")
                 except pynmea2.nmea.ParseError:
                     continue
         except Exception as e:
@@ -66,6 +84,8 @@ async def gps_listener():
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(gps_listener())
+
+
 
 # ------------- serve current robot coordinates -------------
 @app.get("/robot_gps")
@@ -109,6 +129,29 @@ async def receive_coordinates(request: Request):
     return {"status": "ok"}
 
 # ------------- driving logic -------------
+#ENU transform
+
+ref_lat = float(ref_coords["lat"]) if ref_coords["lat"] is not None else None
+ref_lng = float(ref_coords["lng"]) if ref_coords["lng"] is not None else None
+REF_LAT = ref_lat
+REF_LON = ref_lng
+
+
+def latlon_to_local_xy(lat,lon):
+    #convert lat/lon to local ENU meters assuming a flat Earth small area
+    earth_rad = 6378137
+
+    delta_lat = radians(lat - REF_LAT)
+    delta_lon = radians(lon - REF_LON)
+
+    mean_lat = radians((lat+REF_LAT)/2.0)
+
+    x = delta_lon * earth_rad * cos(mean_lat) #east
+    y = delta_lat * earth_rad                 #north
+
+    return x, y
+
+
 @app.post("/run")
 async def run_farmng(request: Request):
     if not last_coordinates:
@@ -119,11 +162,11 @@ async def run_farmng(request: Request):
         poses = []
         for pt in last_coordinates:
             # You *must* convert lat/lng to local map coordinates
-            # Here is a placeholder, you should substitute your
-            # known reference or use a transform if you have one:
+            
+            x, y = latlon_to_local_xy(pt["lat"], pt["lng"])
             pose = Pose3F64(
-                x=pt["lng"],  # placeholder: replace with local-X
-                y=pt["lat"],  # placeholder: replace with local-Y
+                x=x,  # placeholder: replace with local-X
+                y=y,  # placeholder: replace with local-Y
                 z=0,
                 orientation=Isometry3F64.identity().so3()
             )
